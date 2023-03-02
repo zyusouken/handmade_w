@@ -4,8 +4,72 @@
 	HEADER HEADER HEADER HEADER HEADER HEADER
 	========================================= */
 #include<windows.h>
+#include<stdio.h>
 
-LRESULT CALLBACK MainWindowCallBack
+#define internal        static
+#define local_persist   static
+#define global_variable static
+
+//TODO (Casey) This is a global for now.
+global_variable bool Running; //statics always init to 0
+
+global_variable void *BitmapMemory;
+global_variable HBITMAP BitmapHandle;
+global_variable BITMAPINFO BitmapInfo;
+global_variable HDC BitmapDeviceContext;
+
+internal void Win32ResizeDIBSection(int Width, int Height)
+{
+	//TODO (casey): Bulletproof this
+	//Maybe don't free first, free after, then free first if that fails
+	
+	if(BitmapHandle)
+	{
+		DeleteObject(BitmapHandle);
+	}
+	
+	if(!BitmapDeviceContext)
+	{
+		//TODO (casey): Should we recreate these under certain special circumstances?
+		HDC BitmapDeviceContext = CreateCompatibleDC(0);
+	}
+	BITMAPINFO BitmapInfo;
+	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader.biSize);
+	BitmapInfo.bmiHeader.biWidth = Width;
+	BitmapInfo.bmiHeader.biHeight = Height;
+	BitmapInfo.bmiHeader.biPlanes = 1;
+	BitmapInfo.bmiHeader.biBitCount = 32;
+	BitmapInfo.bmiHeader.biCompression = BI_RGB;
+	BitmapInfo.bmiHeader.biSizeImage = 0;
+	BitmapInfo.bmiHeader.biXPelsPerMeter = 0;
+	BitmapInfo.bmiHeader.biYPelsPerMeter = 0;
+	BitmapInfo.bmiHeader.biClrUsed = 0;
+	BitmapInfo.bmiHeader.biClrImportant = 0;
+
+	HDC BitmapDeviceContext = CreateCompatibleDC(0);
+	HBITMAP BitmapHandle = CreateDIBSection
+	(
+		BitmapDeviceContext, &BitmapInfo,
+		DIB_RGB_COLORS,
+		&BitmapMemory,
+		0,0
+	);
+}
+internal void Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
+{
+	StretchDIBits
+	(
+		DeviceContext,
+		X, Y, Width, Height,
+		X, Y, Width, Height,
+		BitmapMemory,
+		&BitmapInfo,
+		DIB_RGB_COLORS, 
+		SRCCOPY
+	);
+}
+
+LRESULT CALLBACK Win32MainWindowCallBack
 (
 	HWND Window, //Main window handle
 	UINT Message,
@@ -17,44 +81,41 @@ LRESULT CALLBACK MainWindowCallBack
 	{
 		case WM_SIZE:
 		{
+			RECT ClientRect;
+			GetClientRect(Window, &ClientRect);
+			int Width = ClientRect.bottom - ClientRect.top;
+			int Height = ClientRect.bottom - ClientRect.top;
+			Win32ResizeDIBSection(Width, Height);
 			OutputDebugStringA("WM_SIZE\n");
-		} break;
-		
-		case WM_DESTROY:
-		{
-			OutputDebugStringA("WM_DESTROY\n");
 		} break;
 		
 		case WM_CLOSE:
 		{
-			OutputDebugStringA("WM_CLOSE\n");
-		} break;
-		
-		case WM_PAINT:
-		{
-			//OutputDebugStringA("WM_PAINT\n");
-			PAINTSTRUCT Paint;
-			HDC DeviceContext = BeginPaint(Window, &Paint);
-			int X = Paint.rcPaint.left;
-			int Y = Paint.rcPaint.top;
-			LONG Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
-			LONG Width = Paint.rcPaint.right - Paint.rcPaint.left;
-			static DWORD Operation = WHITENESS;
-			PatBlt(DeviceContext, X, Y, Width, Height, Operation);
-			if(Operation==WHITENESS)
-			{
-				Operation = BLACKNESS;
-			}
-			else
-			{
-				Operation = WHITENESS;
-			}
-			EndPaint(Window, &Paint);
+			//TODO (Casey) Handle this with a message to the user?
+			Running = false;
 		} break;
 		
 		case WM_ACTIVATEAPP:
 		{
-			OutputDebugStringA("WM_ACTIVATEAPP");
+			OutputDebugStringA("WM_ACTIVATEAPP\n");
+		} break;
+		
+		case WM_DESTROY:
+		{
+			//TODO (Casey) Handle this as an error - recreate window?
+			Running = false;
+		} break;
+		
+		case WM_PAINT:
+		{
+			PAINTSTRUCT Paint;
+			HDC DeviceContext = BeginPaint(Window, &Paint);
+			int X = Paint.rcPaint.left;
+			int Y = Paint.rcPaint.top;
+			int Width = Paint.rcPaint.right - Paint.rcPaint.left;
+			int	 Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
+			Win32UpdateWindow(DeviceContext, X, Y, Width, Height);
+			EndPaint(Window, &Paint);
 		} break;
 		
 		default :
@@ -76,7 +137,7 @@ int CALLBACK WinMain
 	WNDCLASS WindowClass = {};
 
 	//TODO(casey): Check if HREDRAW/VREDRAW/OWNDC still matter
-	WindowClass.lpfnWndProc = MainWindowCallBack;
+	WindowClass.lpfnWndProc = Win32MainWindowCallBack;
 	WindowClass.hInstance = Instance;
 	//WindowClass.hIcon;
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
@@ -101,17 +162,22 @@ int CALLBACK WinMain
 			);
 		if(WindowHandle)
 		{
-			for(;;)
+			Running = true;
+			while(Running)
 			{
 				MSG Message;
-				BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
-				if (MessageResult > 0)
+				BOOL MessageResult = GetMessageA(&Message, 0, 0, 0);
+				if(MessageResult > 0)
 				{
 					TranslateMessage(&Message);
 					DispatchMessageA(&Message);
+					//static int YARP=0;
+					//YARP++;
 				}
 				else
 				{
+					//static int NARP=0;
+					//NARP++;
 					break;
 				}
 			}
@@ -125,6 +191,5 @@ int CALLBACK WinMain
 	{
 		//TODO(casey): Logging
 	}
-	
 	return(0);
 }
